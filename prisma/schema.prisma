@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  USER
+}
+
+enum ShipmentStatus {
+  PENDING
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  RETURNED
+  CANCELLED
+  FAILED
+}
+
+enum CarrierCode {
+  SMSA
+  ARAMEX
+  DHL
+  SPL
+  FETCHR
+  JANDT
+  CUSTOM
+}
+
+enum Platform {
+  ZID
+  SALLA
+  SHOPIFY
+  MANUAL
+}
+
+enum WaybillStatus {
+  AVAILABLE
+  RESERVED
+  USED
+  EXPIRED
+  CANCELLED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String
+  phone         String?
+  role          UserRole  @default(USER)
+  companyName   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  stores        Store[]
+  shipments     Shipment[]
+  waybills      Waybill[]
+
+  @@map("users")
+}
+
+model Store {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  platform      Platform
+  platformStoreId String?
+  accessToken   String?
+  refreshToken  String?
+  webhookSecret String?
+  domain        String?
+  isActive      Boolean   @default(true)
+  metadata      Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  orders        Order[]
+  shipments     Shipment[]
+
+  @@unique([userId, platform, platformStoreId])
+  @@map("stores")
+}
+
+model Carrier {
+  id            String      @id @default(cuid())
+  code          CarrierCode
+  name          String
+  nameAr        String
+  logo          String?
+  isActive      Boolean     @default(true)
+  basePrice     Float       @default(0)
+  discountPct   Float       @default(0)
+  apiConfig     Json?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  shipments     Shipment[]
+  waybillBatches WaybillBatch[]
+  carrierRates  CarrierRate[]
+
+  @@map("carriers")
+}
+
+model CarrierRate {
+  id            String    @id @default(cuid())
+  carrierId     String
+  carrier       Carrier   @relation(fields: [carrierId], references: [id], onDelete: Cascade)
+  fromCity      String
+  toCity        String
+  weight        Float
+  price         Float
+  discountPrice Float
+  currency      String    @default("SAR")
+  estimatedDays Int       @default(3)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([carrierId, fromCity, toCity, weight])
+  @@map("carrier_rates")
+}
+
+model Order {
+  id              String    @id @default(cuid())
+  storeId         String
+  store           Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  platformOrderId String?
+  customerName    String
+  customerEmail   String?
+  customerPhone   String
+  shippingAddress Json
+  items           Json
+  totalAmount     Float
+  currency        String    @default("SAR")
+  status          String    @default("pending")
+  notes           String?
+  metadata        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  shipments       Shipment[]
+
+  @@unique([storeId, platformOrderId])
+  @@map("orders")
+}
+
+model Shipment {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id])
+  storeId         String?
+  store           Store?         @relation(fields: [storeId], references: [id])
+  orderId         String?
+  order           Order?         @relation(fields: [orderId], references: [id])
+  carrierId       String
+  carrier         Carrier        @relation(fields: [carrierId], references: [id])
+  trackingNumber  String?
+  waybillId       String?        @unique
+  waybill         Waybill?       @relation(fields: [waybillId], references: [id])
+  status          ShipmentStatus @default(PENDING)
+  senderName      String
+  senderPhone     String
+  senderCity      String
+  senderAddress   String
+  receiverName    String
+  receiverPhone   String
+  receiverCity    String
+  receiverAddress String
+  weight          Float          @default(1)
+  pieces          Int            @default(1)
+  codAmount       Float          @default(0)
+  description     String?
+  price           Float          @default(0)
+  costPrice       Float          @default(0)
+  labelUrl        String?
+  carrierResponse Json?
+  metadata        Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  trackingEvents  TrackingEvent[]
+
+  @@index([trackingNumber])
+  @@index([userId, status])
+  @@map("shipments")
+}
+
+model TrackingEvent {
+  id          String   @id @default(cuid())
+  shipmentId  String
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  status      String
+  description String
+  location    String?
+  timestamp   DateTime @default(now())
+  rawData     Json?
+
+  @@map("tracking_events")
+}
+
+model WaybillBatch {
+  id          String    @id @default(cuid())
+  carrierId   String
+  carrier     Carrier   @relation(fields: [carrierId], references: [id])
+  prefix      String?
+  startNumber Int
+  endNumber   Int
+  totalCount  Int
+  usedCount   Int       @default(0)
+  costPerUnit Float     @default(0)
+  sellPrice   Float     @default(0)
+  createdAt   DateTime  @default(now())
+  waybills    Waybill[]
+
+  @@map("waybill_batches")
+}
+
+model Waybill {
+  id          String        @id @default(cuid())
+  batchId     String
+  batch       WaybillBatch  @relation(fields: [batchId], references: [id])
+  userId      String?
+  user        User?         @relation(fields: [userId], references: [id])
+  number      String        @unique
+  status      WaybillStatus @default(AVAILABLE)
+  assignedAt  DateTime?
+  usedAt      DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime      @default(now())
+  shipment    Shipment?
+
+  @@index([status])
+  @@map("waybills")
+}
